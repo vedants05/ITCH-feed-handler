@@ -37,7 +37,7 @@ struct __attribute__((packed)) StockDirectoryMessage {
     char authenticity;
     char short_sale_threshold_indicator;
     char ipo_flag;
-    char LULD_reference_price_tier;
+    char LULD_ref_price_tier;
     char ETP_flag;
     uint32_t ETP_leverage_factor;
     char inverse_indicator;
@@ -48,7 +48,7 @@ struct __attribute__((packed)) AddOrderMessage {
     uint16_t stock_locate;
     uint16_t tracking_num;
     uint8_t timestamp[6];
-    uint64_t order_reference_number;
+    uint64_t order_ref_num;
     char buy_sell_indicator;
     uint32_t shares;
     char stock[8];
@@ -60,7 +60,7 @@ struct __attribute__((packed)) DeleteOrderMessage {
     uint16_t stock_locate;
     uint16_t tracking_num;
     uint8_t timestamp[6];
-    uint64_t order_reference_num;
+    uint64_t order_ref_num;
 };
 
 struct __attribute__((packed)) ExecuteOrderMessage {
@@ -68,9 +68,9 @@ struct __attribute__((packed)) ExecuteOrderMessage {
     uint16_t stock_locate;
     uint16_t tracking_num;
     uint8_t timestamp[6];
-    uint64_t order_reference_num;
+    uint64_t order_ref_num;
     uint32_t executed_shares;
-    uint64_t match_number;
+    uint64_t match_num;
 };
 
 struct __attribute__((packed)) CancelOrderMessage {
@@ -78,7 +78,7 @@ struct __attribute__((packed)) CancelOrderMessage {
     uint16_t stock_locate;
     uint16_t tracking_num;
     uint8_t timestamp[6];
-    uint64_t order_reference_num;
+    uint64_t order_ref_num;
     uint32_t cancelled_shares;
 };
 
@@ -87,8 +87,8 @@ struct __attribute__((packed)) ReplaceOrderMessage {
     uint16_t stock_locate;
     uint16_t tracking_num;
     uint8_t timestamp[6];
-    uint64_t original_order_reference_num;
-    uint64_t new_order_reference_num;
+    uint64_t original_order_ref_num;
+    uint64_t new_order_ref_num;
     uint32_t shares;
     uint32_t price;
 };
