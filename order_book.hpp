@@ -30,6 +30,10 @@ class OrderBook {
         void replace_order(uint64_t old_ref, uint64_t new_ref, uint32_t shares, uint32_t price);
         BestBidOffer best_bid_offer() const;
 
+        size_t bid_levels()  const { return m_bids.size(); }
+        size_t ask_levels()  const { return m_asks.size(); }
+        size_t order_count() const { return m_orders.size(); }
+
     private:
         std::map<uint32_t, uint64_t> m_bids;
         std::map<uint32_t, uint64_t> m_asks;

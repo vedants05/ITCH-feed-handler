@@ -122,3 +122,9 @@ void ItchParser::handle_replace_order(const uint8_t *data, size_t len) {
 
     m_books[locate].replace_order(old_ref, new_ref, shares, price);
 }
+
+OrderBook* ItchParser::get_book(uint16_t locate) {
+    auto it = m_books.find(locate);
+    if (it == m_books.end()) return nullptr;
+    return &it->second;
+}

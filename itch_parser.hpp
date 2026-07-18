@@ -12,9 +12,14 @@ static inline uint64_t betoh64(uint64_t x) {
     return ((uint64_t)ntohl(x & 0xFFFFFFFF) << 32) | ntohl(x >> 32);
 }
 
+static inline uint64_t htobe64_portable(uint64_t x) {
+    return ((uint64_t)htonl(x & 0xFFFFFFFF) << 32) | htonl(x >> 32);
+}
+
 class ItchParser {
     public:
         void process(const uint8_t* data, size_t len);
+        OrderBook* get_book(uint16_t locate);
 
     private:
         std::unordered_map<uint16_t, OrderBook> m_books;
