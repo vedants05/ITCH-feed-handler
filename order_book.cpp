@@ -30,8 +30,7 @@ void OrderBook::delete_order(uint64_t ref) {
     m_orders.erase(ref);
 }
 
-void OrderBook::deduct_shares(uint32_t price, uint32_t shares, uint64_t ref, std::map<uint32_t, uint64_t> &type)
-{
+void OrderBook::deduct_shares(uint32_t price, uint32_t shares, uint64_t ref, std::map<uint32_t, uint64_t> &type) {
     type[price] -= shares;
 
     if (type[price] == 0)
@@ -63,13 +62,11 @@ void OrderBook::reduce_order(uint64_t ref, uint32_t shares_to_reduce) {
         m_orders.erase(ref);
 }
 
-
-
 void OrderBook::replace_order(uint64_t old_ref, uint64_t new_ref, uint32_t shares, uint32_t price) {
 
     if (!m_orders.count(old_ref))
         return;
-        
+
     Order old_order = m_orders[old_ref];
 
     char old_side = old_order.side;
