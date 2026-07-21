@@ -4,6 +4,7 @@
 #include <linux/udp.h>
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_endian.h>
+#include <linux/in.h>
 
 // This map tells the kernel which XDP socket to redirect packets to
 struct {
