@@ -1,5 +1,5 @@
 #include <bpf/libbpf.h>
-#include <bpf/xsk.h>
+#include <xdp/xsk.h>
 #include <sys/socket.h>
 #include <sys/mman.h>
 #include <netinet/in.h>
@@ -166,7 +166,8 @@ static int load_xdp_program(XDPSocket& xdp) {
     int map_fd  = bpf_map__fd(map);
     int xsk_fd  = xsk_socket__fd(xdp.xsk);
     int key     = QUEUE_ID;
-    if (bpf_map_update_elem(map_fd, &key, &xsk_fd, BPF_ANY) < 0) {
+    
+    if (bpf_map__update_elem(map, &key, sizeof(key), &xsk_fd, sizeof(xsk_fd), BPF_ANY) < 0) {
         fprintf(stderr, "bpf_map_update_elem failed\n");
         return -1;
     }
