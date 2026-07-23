@@ -31,3 +31,8 @@ add_executable(baseline_receiver
   src/baseline_receiver.cpp
 )
 target_link_libraries(baseline_receiver itch_core)
+
+add_executable(iouring_receiver
+  src/iouring_receiver.cpp
+)
+target_link_libraries(iouring_receiver itch_core uring)
