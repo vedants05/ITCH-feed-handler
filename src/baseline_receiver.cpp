@@ -27,7 +27,6 @@ int main() {
     }
 
     // 2. bind to port 21002
-    // binding tells the OS: give me all packets arriving on this port
     sockaddr_in addr{};
     addr.sin_family      = AF_INET;
     addr.sin_port        = htons(21002);
