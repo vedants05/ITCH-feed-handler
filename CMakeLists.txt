@@ -36,3 +36,26 @@ add_executable(iouring_receiver
   src/iouring_receiver.cpp
 )
 target_link_libraries(iouring_receiver itch_core uring)
+
+# compile eBPF program to object file
+add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/xdp_program.o
+    COMMAND clang
+        -O2
+        -target bpf
+        -c ${CMAKE_CURRENT_SOURCE_DIR}/src/xdp_program.c
+        -o ${CMAKE_CURRENT_BINARY_DIR}/xdp_program.o
+        -I/usr/include/aarch64-linux-gnu
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/xdp_program.c
+    COMMENT "Compiling eBPF XDP program"
+)
+
+add_custom_target(xdp_program ALL
+    DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/xdp_program.o
+)
+
+# XDP receiver
+add_executable(xdp_receiver
+    src/xdp_receiver.cpp
+)
+target_link_libraries(xdp_receiver itch_core bpf elf z)
