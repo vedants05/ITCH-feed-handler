@@ -97,3 +97,81 @@ static void populate_fill_ring(XDPSocket& xdp, size_t count) {
     xsk_ring_prod__submit(&xdp.fill, count);
 }
 
+// setup XDP socket 
+static int setup_xsk(XDPSocket& xdp) {
+    struct xsk_socket_config xsk_cfg{};
+    xsk_cfg.rx_size      = RING_SIZE;
+    xsk_cfg.tx_size      = RING_SIZE;
+    xsk_cfg.libbpf_flags = 0;
+    xsk_cfg.xdp_flags    = XDP_FLAGS_DRV_MODE;  // try driver mode first
+    xsk_cfg.bind_flags   = XDP_USE_NEED_WAKEUP;
+
+    int ret = xsk_socket__create(&xdp.xsk, INTERFACE, QUEUE_ID,
+                                 xdp.umem, &xdp.rx, nullptr, &xsk_cfg);
+
+    if (ret) {
+        // fallback to SKB mode (works on any interface including virtual)
+        printf("Driver mode failed, falling back to SKB mode\n");
+        xsk_cfg.xdp_flags = XDP_FLAGS_SKB_MODE;
+        ret = xsk_socket__create(&xdp.xsk, INTERFACE, QUEUE_ID,
+                                 xdp.umem, &xdp.rx, nullptr, &xsk_cfg);
+        if (ret) {
+            fprintf(stderr, "xsk_socket__create failed: %d\n", ret);
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+// load and attach eBPF program 
+static int load_xdp_program(XDPSocket& xdp) {
+    // find xdp_program.o next to the executable
+    std::string obj_path = "xdp_program.o";
+
+    struct bpf_object* obj = bpf_object__open(obj_path.c_str());
+    if (!obj) {
+        fprintf(stderr, "bpf_object__open failed\n");
+        return -1;
+    }
+
+    if (bpf_object__load(obj)) {
+        fprintf(stderr, "bpf_object__load failed\n");
+        return -1;
+    }
+
+    // find the xdp program inside the object
+    struct bpf_program* prog = bpf_object__find_program_by_name(obj, "xdp_filter");
+    if (!prog) {
+        fprintf(stderr, "couldn't find xdp_filter program\n");
+        return -1;
+    }
+
+    // attach to network interface
+    int ifindex = if_nametoindex(INTERFACE);
+    int prog_fd = bpf_program__fd(prog);
+    if (bpf_xdp_attach(ifindex, prog_fd, XDP_FLAGS_SKB_MODE, nullptr) < 0) {
+        fprintf(stderr, "bpf_xdp_attach failed\n");
+        return -1;
+    }
+
+    // register our XDP socket in the eBPF map
+    // the eBPF filter uses this map to know where to redirect packets
+    struct bpf_map* map = bpf_object__find_map_by_name(obj, "xsks_map");
+    if (!map) {
+        fprintf(stderr, "couldn't find xsks_map\n");
+        return -1;
+    }
+
+    int map_fd  = bpf_map__fd(map);
+    int xsk_fd  = xsk_socket__fd(xdp.xsk);
+    int key     = QUEUE_ID;
+    if (bpf_map_update_elem(map_fd, &key, &xsk_fd, BPF_ANY) < 0) {
+        fprintf(stderr, "bpf_map_update_elem failed\n");
+        return -1;
+    }
+
+    printf("XDP program loaded and attached to %s\n", INTERFACE);
+    return 0;
+}
+
