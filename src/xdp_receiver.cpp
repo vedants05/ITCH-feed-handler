@@ -175,3 +175,126 @@ static int load_xdp_program(XDPSocket& xdp) {
     return 0;
 }
 
+int main() {
+    XDPSocket xdp{};
+
+    // 1. set up UMEM — the shared packet buffer pool
+    if (setup_umem(xdp) < 0) return 1;
+
+    // 2. populate fill ring — give kernel all frames upfront
+    populate_fill_ring(xdp, NUM_FRAMES / 2);
+
+    // 3. create AF_XDP socket
+    if (setup_xsk(xdp) < 0) return 1;
+
+    // 4. load eBPF filter and register socket in map
+    if (load_xdp_program(xdp) < 0) return 1;
+
+    printf("XDP receiver running on %s\n", INTERFACE);
+    printf("Waiting for market open...\n");
+
+    // 5. receive loop
+    ItchParser parser;
+    std::vector<uint64_t> latencies;
+    latencies.reserve(20000);
+    bool running = true;
+
+    while (running) {
+        uint32_t idx_rx;
+        // check how many packets are ready in the RX ring
+        // this is just a memory read — no syscall
+        unsigned int received = xsk_ring_cons__peek(&xdp.rx, 16, &idx_rx);
+
+        if (received == 0) {
+            // no packets yet — if socket needs wakeup, call recvfrom once
+            // this is only needed in SKB mode
+            if (xsk_ring_prod__needs_wakeup(&xdp.fill)) {
+                recvfrom(xsk_socket__fd(xdp.xsk), nullptr, 0, MSG_DONTWAIT,
+                         nullptr, nullptr);
+            }
+            continue;
+        }
+
+        for (unsigned int i = 0; i < received; i++) {
+            // get the RX descriptor — tells us which frame and how many bytes
+            const struct xdp_desc* desc = xsk_ring_cons__rx_desc(&xdp.rx, idx_rx++);
+
+            // get pointer to packet data in UMEM
+            // addr is the offset into our UMEM buffer
+            uint8_t* pkt = (uint8_t*)xdp.umem_area + desc->addr;
+            uint32_t len = desc->len;
+
+            // skip Ethernet (14) + IP (20) + UDP (8) headers = 42 bytes
+            // point directly at ITCH payload
+            if (len > 42) {
+                uint8_t* itch_payload = pkt + 42;
+                uint32_t itch_len     = len - 42;
+
+                uint64_t t0 = now_ns();
+                parser.process(itch_payload, itch_len);
+                uint64_t t1 = now_ns();
+                latencies.push_back(t1 - t0);
+
+                // check for market close
+                if (itch_payload[0] == 'S' && itch_len >= 12 && itch_payload[11] == 'C') {
+                    printf("Market close received. Stopping.\n");
+                    running = false;
+                }
+            }
+
+            // put this frame back in the fill ring for reuse
+            uint32_t fill_idx;
+            if (xsk_ring_prod__reserve(&xdp.fill, 1, &fill_idx) == 1) {
+                *xsk_ring_prod__fill_addr(&xdp.fill, fill_idx) = desc->addr;
+                xsk_ring_prod__submit(&xdp.fill, 1);
+            }
+        }
+
+        // mark all consumed RX entries as done
+        xsk_ring_cons__release(&xdp.rx, received);
+    }
+
+    // 6. print results
+    printf("\n=== Latency Results (AF_XDP) ===\n");
+    printf("Total messages: %zu\n", latencies.size());
+
+    if (!latencies.empty()) {
+        std::sort(latencies.begin(), latencies.end());
+
+        uint64_t sum = std::accumulate(latencies.begin(), latencies.end(), 0ULL);
+        double mean  = static_cast<double>(sum) / latencies.size();
+
+        auto percentile = [&](double p) -> uint64_t {
+            size_t idx = static_cast<size_t>((p / 100.0) * latencies.size());
+            if (idx >= latencies.size()) idx = latencies.size() - 1;
+            return latencies[idx];
+        };
+
+        printf("mean:   %.1f ns\n", mean);
+        printf("p50:    %lu ns\n",  percentile(50));
+        printf("p99:    %lu ns\n",  percentile(99));
+        printf("p99.9:  %lu ns\n",  percentile(99.9));
+        printf("max:    %lu ns\n",  latencies.back());
+
+        OrderBook* book = parser.get_book(1);
+        if (book) {
+            BestBidOffer bbo = book->best_bid_offer();
+            printf("\n=== AAPL Order Book ===\n");
+            printf("Bid levels:  %zu\n", book->bid_levels());
+            printf("Ask levels:  %zu\n", book->ask_levels());
+            printf("Live orders: %zu\n", book->order_count());
+            if (bbo.bid_price > 0)
+                printf("Best bid: %.4f  qty %lu\n",
+                       bbo.bid_price / 10000.0, bbo.bid_qty);
+            if (bbo.ask_price > 0)
+                printf("Best ask: %.4f  qty %lu\n",
+                       bbo.ask_price / 10000.0, bbo.ask_qty);
+        }
+    }
+
+    xsk_socket__delete(xdp.xsk);
+    xsk_umem__delete(xdp.umem);
+    munmap(xdp.umem_area, UMEM_SIZE);
+
+    return 0;
+}
