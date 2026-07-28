@@ -55,7 +55,12 @@ add_custom_target(xdp_program ALL
 )
 
 # XDP receiver
+
+# find libxdp
+find_library(LIBXDP xdp HINTS /usr/lib/aarch64-linux-gnu)
+find_library(LIBBPF bpf HINTS /usr/lib/aarch64-linux-gnu)
+
 add_executable(xdp_receiver
     src/xdp_receiver.cpp
 )
-target_link_libraries(xdp_receiver itch_core bpf elf z)
+target_link_libraries(xdp_receiver itch_core ${LIBXDP} ${LIBBPF} elf z)
