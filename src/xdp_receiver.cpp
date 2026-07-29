@@ -36,11 +36,12 @@ static inline uint64_t now_ns() {
 
 // XDP socket state 
 struct XDPSocket {
-    struct xsk_socket*          xsk;
-    struct xsk_ring_cons        rx;
-    struct xsk_ring_prod        fill;
-    struct xsk_umem*            umem;
-    void*                       umem_area;
+    struct xsk_socket* xsk;
+    struct xsk_ring_cons rx;
+    struct xsk_ring_prod fill;
+	struct xsk_ring_cons comp;
+    struct xsk_umem* umem;
+    void* umem_area;
 };
 
 static int setup_umem(XDPSocket& xdp) {
@@ -50,19 +51,17 @@ static int setup_umem(XDPSocket& xdp) {
     memset(xdp.umem_area, 0, UMEM_SIZE);
     mlock(xdp.umem_area, UMEM_SIZE);
 
-    struct xsk_umem_opts opts{};
-    opts.sz           = sizeof(opts);
-    opts.size         = UMEM_SIZE;
-    opts.fill_size    = RING_SIZE;
-    opts.comp_size    = RING_SIZE;
-    opts.frame_size   = FRAME_SIZE;
-    opts.frame_headroom = 0;
-    opts.flags        = 0;
+    struct xsk_umem_config umem_cfg{};
+    umem_cfg.fill_size      = RING_SIZE;
+    umem_cfg.comp_size      = RING_SIZE;
+    umem_cfg.frame_size     = FRAME_SIZE;
+    umem_cfg.frame_headroom = 0;
+    umem_cfg.flags          = 0;
 
-    xdp.umem = xsk_umem__create_opts(xdp.umem_area,
-                                     &xdp.fill, nullptr, &opts);
-    if (!xdp.umem) {
-        fprintf(stderr, "xsk_umem__create_opts failed: %s\n", strerror(errno));
+    int ret = xsk_umem__create(&xdp.umem, xdp.umem_area, UMEM_SIZE,
+                               &xdp.fill, &xdp.comp, &umem_cfg);
+    if (ret) {
+        fprintf(stderr, "xsk_umem__create failed: %d (%s)\n", ret, strerror(-ret));
         return -1;
     }
 
