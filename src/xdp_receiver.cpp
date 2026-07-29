@@ -21,7 +21,7 @@
 #include "itch_parser.hpp"
 
 // constants 
-static const char*   INTERFACE   = "enp0s1";
+static const char* INTERFACE = "lo";
 static const int     QUEUE_ID    = 0;
 static const size_t  FRAME_SIZE  = 2048;
 static const size_t  NUM_FRAMES  = 2048;
