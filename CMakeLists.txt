@@ -42,6 +42,7 @@ add_custom_command(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/xdp_program.o
     COMMAND clang
         -O2
+        -g
         -target bpf
         -c ${CMAKE_CURRENT_SOURCE_DIR}/src/xdp_program.c
         -o ${CMAKE_CURRENT_BINARY_DIR}/xdp_program.o
