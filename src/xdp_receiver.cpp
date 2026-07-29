@@ -60,10 +60,11 @@ static int setup_umem(XDPSocket& xdp) {
 
     int ret = xsk_umem__create(&xdp.umem, xdp.umem_area, UMEM_SIZE,
                                &xdp.fill, nullptr, &umem_cfg);
-    if (ret) {
-        fprintf(stderr, "xsk_umem__create failed: %d\n", ret);
-        return -1;
-    }
+				
+	if (ret) {
+		fprintf(stderr, "xsk_umem__create failed: %d (%s)\n", ret, strerror(-ret));
+		return -1;
+	}
 
     printf("UMEM registered with kernel\n");
     return 0;
