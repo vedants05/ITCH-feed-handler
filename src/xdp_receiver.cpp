@@ -93,7 +93,7 @@ static int setup_xsk(XDPSocket& xdp) {
     struct xsk_socket_config xsk_cfg{};
     xsk_cfg.rx_size      = RING_SIZE;
     xsk_cfg.tx_size      = RING_SIZE;
-    xsk_cfg.libbpf_flags = 0;
+    xsk_cfg.libbpf_flags = XSK_LIBBPF_FLAGS__INHIBIT_PROG_LOAD;
     xsk_cfg.xdp_flags    = XDP_FLAGS_DRV_MODE;  // try driver mode first
     xsk_cfg.bind_flags   = XDP_USE_NEED_WAKEUP;
 
@@ -180,20 +180,26 @@ int main() {
     if (setup_xsk(xdp) < 0) return 1;
 
     // 4. load eBPF filter and register socket in map
-    int xsks_map_fd;
     int ifindex = if_nametoindex(INTERFACE);
-    if (xsk_setup_xdp_prog(ifindex, &xsks_map_fd) < 0) {
-        fprintf(stderr, "xsk_setup_xdp_prog failed\n");
-        return 1;
-    }
-    if (xsk_socket__update_xskmap(xdp.xsk, xsks_map_fd) < 0) {
-        fprintf(stderr, "xsk_socket__update_xskmap failed\n");
-        return 1;
-    }
-    printf("XDP program loaded and attached to %s\n", INTERFACE);
 
-    printf("XDP receiver running on %s\n", INTERFACE);
-    printf("Waiting for market open...\n");
+    struct bpf_object* obj = bpf_object__open("xdp_program.o");
+    if (!obj) { fprintf(stderr, "bpf open failed\n"); return 1; }
+    if (bpf_object__load(obj)) { fprintf(stderr, "bpf load failed\n"); return 1; }
+
+    struct bpf_program* prog = bpf_object__find_program_by_name(obj, "xdp_filter");
+    int prog_fd = bpf_program__fd(prog);
+
+    if (bpf_xdp_attach(ifindex, prog_fd, XDP_FLAGS_SKB_MODE, nullptr) < 0) {
+        fprintf(stderr, "bpf_xdp_attach failed\n"); return 1;
+    }
+
+    struct bpf_map* map = bpf_object__find_map_by_name(obj, "xsks_map");
+    int map_fd = bpf_map__fd(map);
+    int key = QUEUE_ID;
+    int xsk_fd = xsk_socket__fd(xdp.xsk);
+    bpf_map__update_elem(map, &key, sizeof(key), &xsk_fd, sizeof(xsk_fd), BPF_ANY);
+
+    printf("Custom XDP filter loaded on %s\n", INTERFACE);
 
     // 5. receive loop
     ItchParser parser;
