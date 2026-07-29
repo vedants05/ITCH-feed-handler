@@ -3,6 +3,8 @@
 #include <sys/socket.h>
 #include <sys/mman.h>
 #include <netinet/in.h>
+#include <cstdlib>
+#include <unistd.h>
 #include <linux/if_link.h>
 #include <net/if.h>
 #include <unistd.h>
@@ -39,29 +41,17 @@ struct XDPSocket {
     void*                       umem_area;
 };
 
-// setup UMEM
 static int setup_umem(XDPSocket& xdp) {
-    // allocate 4MB of page-aligned memory for packet frames
-    xdp.umem_area = mmap(nullptr, UMEM_SIZE,
-                         PROT_READ | PROT_WRITE,
-                         MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB,
-                         -1, 0);
 
-    if (xdp.umem_area == MAP_FAILED) {
-        // fallback to normal pages if hugepages unavailable
-        xdp.umem_area = mmap(nullptr, UMEM_SIZE,
-                             PROT_READ | PROT_WRITE,
-                             MAP_PRIVATE | MAP_ANONYMOUS,
-                             -1, 0);
-        if (xdp.umem_area == MAP_FAILED) {
-            perror("mmap"); return -1;
-        }
-        printf("Note: using normal pages (hugepages unavailable)\n");
-    } else {
-        printf("Using hugepages for UMEM\n");
+    // allocate 4MB of aligned memory
+    if (posix_memalign(&xdp.umem_area, getpagesize(), UMEM_SIZE) != 0) {
+        perror("posix_memalign");
+        return -1;
     }
 
-    // register the memory region with the kernel as a UMEM
+    memset(xdp.umem_area, 0, UMEM_SIZE);
+    printf("UMEM allocated: %zu bytes\n", UMEM_SIZE);
+
     struct xsk_umem_config umem_cfg{};
     umem_cfg.fill_size      = RING_SIZE;
     umem_cfg.comp_size      = RING_SIZE;
@@ -75,6 +65,7 @@ static int setup_umem(XDPSocket& xdp) {
         return -1;
     }
 
+    printf("UMEM registered with kernel\n");
     return 0;
 }
 
