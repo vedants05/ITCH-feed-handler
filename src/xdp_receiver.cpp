@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <numeric>
 #include <string>
+#include <sys/mman.h>
 
 #include "itch_parser.hpp"
 
@@ -42,29 +43,33 @@ struct XDPSocket {
 };
 
 static int setup_umem(XDPSocket& xdp) {
-
-    // allocate 4MB of aligned memory
     if (posix_memalign(&xdp.umem_area, getpagesize(), UMEM_SIZE) != 0) {
         perror("posix_memalign");
         return -1;
     }
-
     memset(xdp.umem_area, 0, UMEM_SIZE);
-    printf("UMEM allocated: %zu bytes\n", UMEM_SIZE);
+
+    // pin pages in RAM so kernel can use them for DMA
+    if (mlock(xdp.umem_area, UMEM_SIZE) != 0) {
+        perror("mlock");
+        return -1;
+    }
+
+    printf("UMEM allocated and locked: %zu bytes\n", UMEM_SIZE);
 
     struct xsk_umem_config umem_cfg{};
     umem_cfg.fill_size      = RING_SIZE;
     umem_cfg.comp_size      = RING_SIZE;
     umem_cfg.frame_size     = FRAME_SIZE;
     umem_cfg.frame_headroom = 0;
+    umem_cfg.flags          = 0;
 
     int ret = xsk_umem__create(&xdp.umem, xdp.umem_area, UMEM_SIZE,
                                &xdp.fill, nullptr, &umem_cfg);
-				
-	if (ret) {
-		fprintf(stderr, "xsk_umem__create failed: %d (%s)\n", ret, strerror(-ret));
-		return -1;
-	}
+    if (ret) {
+        fprintf(stderr, "xsk_umem__create failed: %d (%s)\n", ret, strerror(-ret));
+        return -1;
+    }
 
     printf("UMEM registered with kernel\n");
     return 0;
