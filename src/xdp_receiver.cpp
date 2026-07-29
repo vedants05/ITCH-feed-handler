@@ -16,6 +16,7 @@
 #include <numeric>
 #include <string>
 #include <sys/mman.h>
+#include <cerrno>
 
 #include "itch_parser.hpp"
 
@@ -44,30 +45,24 @@ struct XDPSocket {
 
 static int setup_umem(XDPSocket& xdp) {
     if (posix_memalign(&xdp.umem_area, getpagesize(), UMEM_SIZE) != 0) {
-        perror("posix_memalign");
-        return -1;
+        perror("posix_memalign"); return -1;
     }
     memset(xdp.umem_area, 0, UMEM_SIZE);
+    mlock(xdp.umem_area, UMEM_SIZE);
 
-    // pin pages in RAM so kernel can use them for DMA
-    if (mlock(xdp.umem_area, UMEM_SIZE) != 0) {
-        perror("mlock");
-        return -1;
-    }
+    struct xsk_umem_opts opts{};
+    opts.sz           = sizeof(opts);
+    opts.size         = UMEM_SIZE;
+    opts.fill_size    = RING_SIZE;
+    opts.comp_size    = RING_SIZE;
+    opts.frame_size   = FRAME_SIZE;
+    opts.frame_headroom = 0;
+    opts.flags        = 0;
 
-    printf("UMEM allocated and locked: %zu bytes\n", UMEM_SIZE);
-
-    struct xsk_umem_config umem_cfg{};
-    umem_cfg.fill_size      = RING_SIZE;
-    umem_cfg.comp_size      = RING_SIZE;
-    umem_cfg.frame_size     = FRAME_SIZE;
-    umem_cfg.frame_headroom = 0;
-    umem_cfg.flags          = 0;
-
-    int ret = xsk_umem__create(&xdp.umem, xdp.umem_area, UMEM_SIZE,
-                               &xdp.fill, nullptr, &umem_cfg);
-    if (ret) {
-        fprintf(stderr, "xsk_umem__create failed: %d (%s)\n", ret, strerror(-ret));
+    xdp.umem = xsk_umem__create_opts(xdp.umem_area,
+                                     &xdp.fill, nullptr, &opts);
+    if (!xdp.umem) {
+        fprintf(stderr, "xsk_umem__create_opts failed: %s\n", strerror(errno));
         return -1;
     }
 
@@ -121,57 +116,57 @@ static int setup_xsk(XDPSocket& xdp) {
     return 0;
 }
 
-// load and attach eBPF program 
-static int load_xdp_program(XDPSocket& xdp) {
-    // find xdp_program.o next to the executable
-    std::string obj_path = "xdp_program.o";
+// // load and attach eBPF program 
+// static int load_xdp_program(XDPSocket& xdp) {
+//     // find xdp_program.o next to the executable
+//     std::string obj_path = "xdp_program.o";
 
-    struct bpf_object* obj = bpf_object__open(obj_path.c_str());
-    if (!obj) {
-        fprintf(stderr, "bpf_object__open failed\n");
-        return -1;
-    }
+//     struct bpf_object* obj = bpf_object__open(obj_path.c_str());
+//     if (!obj) {
+//         fprintf(stderr, "bpf_object__open failed\n");
+//         return -1;
+//     }
 
-    if (bpf_object__load(obj)) {
-        fprintf(stderr, "bpf_object__load failed\n");
-        return -1;
-    }
+//     if (bpf_object__load(obj)) {
+//         fprintf(stderr, "bpf_object__load failed\n");
+//         return -1;
+//     }
 
-    // find the xdp program inside the object
-    struct bpf_program* prog = bpf_object__find_program_by_name(obj, "xdp_filter");
-    if (!prog) {
-        fprintf(stderr, "couldn't find xdp_filter program\n");
-        return -1;
-    }
+//     // find the xdp program inside the object
+//     struct bpf_program* prog = bpf_object__find_program_by_name(obj, "xdp_filter");
+//     if (!prog) {
+//         fprintf(stderr, "couldn't find xdp_filter program\n");
+//         return -1;
+//     }
 
-    // attach to network interface
-    int ifindex = if_nametoindex(INTERFACE);
-    int prog_fd = bpf_program__fd(prog);
-    if (bpf_xdp_attach(ifindex, prog_fd, XDP_FLAGS_SKB_MODE, nullptr) < 0) {
-        fprintf(stderr, "bpf_xdp_attach failed\n");
-        return -1;
-    }
+//     // attach to network interface
+//     int ifindex = if_nametoindex(INTERFACE);
+//     int prog_fd = bpf_program__fd(prog);
+//     if (bpf_xdp_attach(ifindex, prog_fd, XDP_FLAGS_SKB_MODE, nullptr) < 0) {
+//         fprintf(stderr, "bpf_xdp_attach failed\n");
+//         return -1;
+//     }
 
-    // register our XDP socket in the eBPF map
-    // the eBPF filter uses this map to know where to redirect packets
-    struct bpf_map* map = bpf_object__find_map_by_name(obj, "xsks_map");
-    if (!map) {
-        fprintf(stderr, "couldn't find xsks_map\n");
-        return -1;
-    }
+//     // register our XDP socket in the eBPF map
+//     // the eBPF filter uses this map to know where to redirect packets
+//     struct bpf_map* map = bpf_object__find_map_by_name(obj, "xsks_map");
+//     if (!map) {
+//         fprintf(stderr, "couldn't find xsks_map\n");
+//         return -1;
+//     }
 
-    int map_fd  = bpf_map__fd(map);
-    int xsk_fd  = xsk_socket__fd(xdp.xsk);
-    int key     = QUEUE_ID;
+//     int map_fd  = bpf_map__fd(map);
+//     int xsk_fd  = xsk_socket__fd(xdp.xsk);
+//     int key     = QUEUE_ID;
     
-    if (bpf_map__update_elem(map, &key, sizeof(key), &xsk_fd, sizeof(xsk_fd), BPF_ANY) < 0) {
-        fprintf(stderr, "bpf_map_update_elem failed\n");
-        return -1;
-    }
+//     if (bpf_map__update_elem(map, &key, sizeof(key), &xsk_fd, sizeof(xsk_fd), BPF_ANY) < 0) {
+//         fprintf(stderr, "bpf_map_update_elem failed\n");
+//         return -1;
+//     }
 
-    printf("XDP program loaded and attached to %s\n", INTERFACE);
-    return 0;
-}
+//     printf("XDP program loaded and attached to %s\n", INTERFACE);
+//     return 0;
+// }
 
 int main() {
     XDPSocket xdp{};
@@ -186,7 +181,17 @@ int main() {
     if (setup_xsk(xdp) < 0) return 1;
 
     // 4. load eBPF filter and register socket in map
-    if (load_xdp_program(xdp) < 0) return 1;
+    int xsks_map_fd;
+    int ifindex = if_nametoindex(INTERFACE);
+    if (xsk_setup_xdp_prog(ifindex, &xsks_map_fd) < 0) {
+        fprintf(stderr, "xsk_setup_xdp_prog failed\n");
+        return 1;
+    }
+    if (xsk_socket__update_xskmap(xdp.xsk, xsks_map_fd) < 0) {
+        fprintf(stderr, "xsk_socket__update_xskmap failed\n");
+        return 1;
+    }
+    printf("XDP program loaded and attached to %s\n", INTERFACE);
 
     printf("XDP receiver running on %s\n", INTERFACE);
     printf("Waiting for market open...\n");
